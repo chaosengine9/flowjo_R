@@ -1,5 +1,20 @@
-#open libraries
-library(flowWorkspace)
+
+# Choices (ASSIGN INPUT FROM GUI) -----------------------------------------------------------------
+##Overlay expression? y/n
+expressionToggle <- as.character("y")
+
+##Which parameter?
+expressionParameter <- as.character("FMOSubtractSet.Adjusted_CD25_PE_gMFI")
+
+##Stack populations based on parent? y/n
+stackToggle <- as.character("y")
+
+##Group bars based on indication? y/n
+indicationToggle <- as.character("n")
+
+
+# Libraries ---------------------------------------------------------------
+#library(flowWorkspace)
 library(plyr)
 library(dplyr)
 library(ggplot2)
@@ -7,12 +22,14 @@ library(ggplot2)
 #library(extrafont)
 library(scales)
 #library(hmisc)
-library(cytofkit)
-library(scales)
+#library(cytofkit)
+#library(scales)
 library(wesanderson)
 library(RColorBrewer)
+library(data.table)
 
-#Functions!!
+
+# Functions ---------------------------------------------------------------
 squish_trans <- function(from, to, factor) {
   
   trans <- function(x) {
@@ -45,110 +62,121 @@ squish_trans <- function(from, to, factor) {
   return(trans_new("squished", trans, inv))
 }
 
-setwd("H:/Programming/R/FlowLink/TSK04_Trans_002/") ##Change to Linux server location
-
-#Load donors
-donorsList <- c("workspace002_donor1.rds","workspace002_donor2.rds","workspace002_donor3.rds") ##ASSIGN INPUT FROM GUI
-donors.data<-list()
-for (i in 1:length(donorsList)){
-  donors.data[[i]]<-readRDS(donorsList[i])
-  donors.data[[i]]$full_stain$Donor <- i
-  donors.data[[i]]$CD25_FMO$Donor <- i
-  donors.data[[i]]$CD38_FMO$Donor <- i
-}
-
-
-#add donor and sample columns then produce one large table
-fullTable <- NULL
-for (i in 1:length(donorsList)){
-  donors.data[[i]]<-readRDS(donorsList[i])
-  for (j in 1:length(attr(donors.data[[1]],"names"))){
-    donors.data[[i]][[j]]$Donor <- i
-    donors.data[[i]][[j]]$sample <- attr(donors.data[[1]],"names")[j]
-    fullTable <- rbind(fullTable,donors.data[[i]][[j]])
-  }
-}
-
-#remove expression that causes trouble -> âˆ’
-fullTable <- as.data.frame(lapply(fullTable, function(x) {
-  gsub("âˆ’", "_", x)}), stringsAsFactors = FALSE)
-fullTable$Count <- as.numeric(as.character(fullTable$Count))
-fullTable$ParentCount <- as.numeric(as.character(fullTable$ParentCount))
-
-#Add extra statistic
-fullTable <- mutate(fullTable,frequency_of_Parent = (Count/ParentCount)*100)
-
-#Making a simple Bar graph-----------------------------------------------------------------
-##Get subset of data
-plotSet <- subset(fullTable, Population == "aTreg cells (Fr. II)/CD25+") ##ASSIGN INPUT FROM GUI
-plotSet <- subset(plotSet, sample == "full_stain" | sample =="CD25_FMO") ##ASSIGN INPUT FROM GUI
-
-##Need a section here that lets you say percentage of which population - help!
-
-##summary table
-statSet <- ddply(plotSet, c("sample"), summarise,
-               N    = length(frequency_of_Parent),
-               mean = mean(frequency_of_Parent),
-               sd   = sd(frequency_of_Parent),
-               se   = sd / sqrt(N),
-               frequency_of_Parent = mean
-)
-
-
-##plot the bar graph
-plot1 <- ggplot(plotSet, aes(x=sample, y=frequency_of_Parent)) + geom_dotplot(binaxis='y', binwidth = 1, stackdir='center') + stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", color="black", width=0.2) + stat_summary(fun.y=mean, geom="point", color="red") + geom_bar(data=statSet,stat="identity", color="black", alpha=0.2) + theme_classic()+labs(title="Proportion of aTreg that are CD25+")
-print(plot1)
-
-
-
-
-#Making a more complex Bar graph-----------------------------------------------------------------
-##Get subset of data
-populationNames <- c("B cells","NK cells","T cells") ##Hard coding for now - Ignore this step in real code
-plotSet <- subset(fullTable, Population %in% populationNames) ##ASSIGN INPUT FROM GUI
-plotSet <- subset(plotSet, sample == "full_stain") ##ASSIGN INPUT FROM GUI
-
-displayStat <- "frequency_of_Parent"  ##ASSIGN INPUT FROM GUI
-
-##Need a section here that lets you say percentage of which population - help!
-
-##summary table
 statSetting <- function(x, y, col){
   z <- ddply(x, y, .fun = function(xx){
     c(mean= mean(xx[,col],na.rm=TRUE),
       N = length(xx[,col]), sd = sd(xx[,col],na.rm=TRUE),se = sd(xx[,col],na.rm=TRUE) / sqrt(length(xx[,col]))) })
   return(z)
-}#need to add the frequency of parent column... not sure why as its coming from plotSet but still...
+}
 
-statSet <- statSetting(plotSet, "Population", displayStat)
-statSet[[displayStat]]= with(statSet,mean) 
+# Generate fullTable -----------------------------------------------
+#Load files
+setwd("H:/Programming/R/FlowLink/TSK04_Trans_002/") ##Change to Linux server location
+fileList <- c("RCC_001_DTC_panel2.rds","RCC_002_DTC_panel2.rds","RCC_003_DTC_panel2.rds") ##ASSIGN INPUT FROM GUI
+dat_list = lapply(fileList, function (x) data.table(readRDS(x)))
+fullTable = rbindlist(dat_list, fill = TRUE)
 
-##plot the bar graph - 
-plot2 <- ggplot(plotSet, aes_string(x="Population", y=displayStat)) + geom_dotplot(binaxis='y', binwidth = 1, stackdir='center') + stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", color="black", width=0.2) + stat_summary(fun.y=mean, geom="point", color="red") + geom_bar(data=statSet,stat="identity", color="black", alpha=0.2)# + theme_classic()+labs(title="Proportion of aTreg that are CD25+")
-print(plot2)
+#remove expression that causes trouble -> âˆ’
+fullTable <- as.data.frame(lapply(fullTable, function(x) {
+  gsub("âˆ’", "_", x)}), stringsAsFactors = FALSE)
+
+#Make additional columns numeric
+numericColumns <- names(fullTable)[!names(fullTable) %in%  c("name", "Path", "Population", "Parent", "Donor", "sample", "donorList", "panelList", "stainList")]
+for(numericColumn in numericColumns) {
+  fullTable[[numericColumn]] <- as.numeric(fullTable[[numericColumn]])
+}
+
+#Add extra statistic
+fullTable <- mutate(fullTable,frequency_of_Parent = (Count/ParentCount)*100)
 
 
-#Making a stacked columns graph---------------------------------------------------------------
+
+# Subset fulltable and subtract FMOs --------------------------------------------------------
 ##Get subset of data
-#plotSet <- subset(fullTable, Population == "CD4+" | Population == "aTreg cells (Fr. II)" | Population == "CD45RA_FoxP3lo non-Treg cell fraction (Fr. III)" | Population == "rTreg" | Population == "CD8+" |  Population == "CD8+/CD25+") ##ASSIGN INPUT FROM GUI
-plotSet <- subset(fullTable, Population == "B cells" | Population == "Myeloid DC" | Population == "Plasmacytoid DC" | Population == "Lin-" | Population == "CD56 high" | Population == "CD56 low" | Population == "Classical Monocytes" | Population == "Intermediate Monocytes" | Population == "Non-classical monocytes" | Population == "T cells") ##ASSIGN INPUT FROM GUI
-plotSet <- subset(plotSet, sample == "full_stain") ##ASSIGN INPUT FROM GUI
-plotSet <- subset(plotSet, Donor == "3") ##ASSIGN INPUT FROM GUI
-
-##summary table
-statSet <- ddply(plotSet, c("Population"), summarise,
-                 N    = length(frequency_of_Parent),
-                 mean = mean(frequency_of_Parent),
-                 sd   = sd(frequency_of_Parent),
-                 se   = sd / sqrt(N),
-                 frequency_of_Parent = mean
-)
-
-##plot the bar graph - 'scale_x_discrete(labels=' needs generalising, probably with GUI input
-plot3 <- ggplot(plotSet, aes(x=Parent, y=Count, fill=Population)) + geom_bar(stat="identity") + theme_classic() + labs(title="TIL Composition") + theme(plot.title = element_text(hjust = 0.5), axis.title.x=element_blank()) + scale_x_discrete(labels=c("B cells", "Lin-", "Dendritic cells", "T cells", "Monocytes", "NK cells"))+scale_fill_brewer(palette="Set3")#+scale_fill_hue(l=100, c=100)#+scale_y_continuous(trans = squish_trans(10000, 40000, 10), breaks = c(0, 2000, 4000, 6000, 8000, 10000, 20000,30000))
-print(plot3)
+plotSet <- subset(fullTable, Population == "B cells" | Population == "CD14-CD3-" |Population == "Myeloid DC" | Population == "Plasmacytoid DC" | Population == "Dendritic cells" |Population == "Lin-" | Population == "CD56 high" | Population == "CD56 low" | Population == "NK cells" | Population == "Monocytes" | Population == "Classical Monocytes" | Population == "Intermediate Monocytes" | Population == "Non-classical monocytes" | Population == "T cells")
+plotSet <- mutate(plotSet,ID = paste(donorList, Population, sep = '_'))
+plotSet <- mutate(plotSet, Indication = strsplit(ID,'_')[[1]][1])
 
 
+##subtract FMOs
+FMOSubtractSet <- plotSet[c("ID","name","Path","Population","Parent","Count","ParentCount", "donorList", "panelList", "stainList", "frequency_of_Parent", "gMFI_Comp.PE.A")]
+FMOSubtractSet <- subset(FMOSubtractSet, stainList == "Full stain"|stainList == "CD25 FMO")
+FMOSubtractSet <- reshape(FMOSubtractSet, idvar = "ID", timevar = "stainList", direction = "wide")
+
+pathSplits<-data.frame(do.call('rbind', strsplit(as.character(FMOSubtractSet$'Path.Full stain'),'/',fixed=TRUE)))
+for(i in 1:ncol(pathSplits)){
+  if(length(unique(pathSplits[,i]))>1){
+    #create the extra column in FMOSubtractSet that has the right FMO value to subtract etc
+    FMOSubtractSet$bello <- pathSplits[,i]
+    dfFMO <- merge(data.frame(FMOSubtractSet$ID, FMOSubtractSet$`Population.Full stain`,FMOSubtractSet$`gMFI_Comp.PE.A.CD25 FMO`),data.frame(unique(pathSplits[,i])), by.x = "FMOSubtractSet..Population.Full.stain.", by.y = "unique.pathSplits...i..")
+    FMOSubtractSet$bello <- paste0(FMOSubtractSet$`donorList.Full stain`,"_",FMOSubtractSet$bello) 
+    FMOSubtractSet <- merge(dfFMO, FMOSubtractSet, by.x = "FMOSubtractSet.ID", by.y = "bello")
+    FMOSubtractSet <- mutate(FMOSubtractSet, Adjusted_CD25_PE_gMFI = ifelse(`gMFI_Comp.PE.A.Full stain` - `FMOSubtractSet..gMFI_Comp.PE.A.CD25.FMO.`>0,`gMFI_Comp.PE.A.Full stain` - `FMOSubtractSet..gMFI_Comp.PE.A.CD25.FMO.`,0))
+    plotSet <- subset(plotSet, stainList == "Full stain")
+    plotSet <- merge(plotSet,data.frame(FMOSubtractSet$ID,FMOSubtractSet$Adjusted_CD25_PE_gMFI),by.x = "ID",by.y = "FMOSubtractSet.ID")
+    break
+  }
+}
+
+plotSet <- subset(plotSet, Population == "B cells" | Population == "Myeloid DC" | Population == "Plasmacytoid DC" | Population == "Lin-" | Population == "CD56 high" | Population == "CD56 low" | Population == "Classical Monocytes" | Population == "Intermediate Monocytes" | Population == "Non-classical monocytes" | Population == "T cells") ##ASSIGN INPUT FROM GUI
+#plotSet <- subset(plotSet, donorList == "RCC_001_DTC") ##ASSIGN INPUT FROM GUI
+
+##Dataframe per donor and dynamically figure out x-axis labels
+tableList <- list()
+for (i in 1:length(unique(FMOSubtractSet$`donorList.Full stain`))){
+  plotTableName <- unique(FMOSubtractSet$`donorList.Full stain`)[i]
+  tableListItem <- subset(plotSet, donorList == unique(FMOSubtractSet$`donorList.Full stain`)[i])
+  change <- tableListItem[duplicated(tableListItem$Parent),]$Parent
+  tableListItem <- within(tableListItem, { xLabels = ifelse(Parent %in% change, Parent, Population) })
+  tableList[[plotTableName]] <- tableListItem
+}
+
+# INDIVIDUAL PLOTS --------------------------------------------
+##plot each donor
+myPlots <- list()
+columnNames <- names(tableList[[1]])
+for (i in 1:length(tableList)){
+  local({
+  i <- i
+  tempSet <- as.data.frame(tableList[i])
+  colnames(tempSet) <- columnNames
+  stackToggle <- assign(stackToggle, ifelse(stackToggle == "y", "xLabels", "Population"))
+  if(expressionToggle=="y"){
+    plot <- ggplot(tempSet, aes(x=get(stackToggle), y=Count, fill=get(expressionParameter))) + geom_bar(stat="identity") +  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ labs(fill=paste0(expressionParameter), title=paste0("proportions and CD25 receptor density of immune \n cell populations in ", names(tableList)[i])) + theme(plot.title = element_text(hjust = 0.5), axis.title.x=element_blank()) + scale_fill_gradient(low = "white", high = "darkred", limits=c(0,as.numeric(paste0(max(as.numeric(lapply(tableList, function(x){max(x[[expressionParameter]])})))))))
+  } else if(expressionToggle=="n"){
+    plot <- ggplot(tempSet, aes(x=get(stackToggle), y=Count, fill=Population)) + geom_bar(stat="identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + labs(title= paste0("Proportions of immune cell populations in ", names(tableList)[i])) + theme(plot.title = element_text(hjust = 0.5), axis.title.x=element_blank()) +scale_fill_brewer(palette="Set3")
+  }
+  myPlots[[i]] <<- plot
+  print(myPlots[i])
+  })
+}
+
+
+# POOL PLOTS --------------------------------------------------------------
+plotSet <- rbindlist(tableList)
+
+##get statistics for the pooled donors
+y_variable <- as.character("Count")
+statSet <- statSetting(plotSet, "Population", y_variable)
+statSet[[y_variable]]= with(statSet,mean)
+statSet <- merge(statSet,unique.data.frame(data.frame(plotSet$Population,plotSet$xLabels)), by.x = "Population", by.y = "plotSet.Population")
+names(statSet)[7] <- "xLabels"
+
+
+stackToggle <- assign(stackToggle, ifelse(stackToggle == "y", "xLabels", "Population"))
+if(indicationToggle=="y"){
+  poolPlot <- ggplot(plotSet, aes(x=get(stackToggle), y=get(y_variable), fill=Population)) + geom_bar(data=statSet,stat="identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +scale_fill_brewer(palette="Set3") + geom_dotplot(binaxis='y', binwidth = 1, stackdir='center') + stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", color="black", width=0.2) + labs(y = paste0(y_variable), title= paste0("Proportions of immune cell populations in ")) + theme(plot.title = element_text(hjust = 0.5), axis.title.x=element_blank()) +facet_wrap(~Indication)
+} else if(indicationToggle=="n"){
+  poolPlot <- ggplot(plotSet, aes(x=get(stackToggle), y=get(y_variable), fill=Population)) + geom_bar(data=statSet,stat="identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +scale_fill_brewer(palette="Set3") + geom_dotplot(binaxis='y', binwidth = 1, stackdir='center') + stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", color="black", width=0.2) + labs(y = paste0(y_variable), title= paste0("Proportions of immune cell populations in ")) + theme(plot.title = element_text(hjust = 0.5), axis.title.x=element_blank())
+}
+print(poolPlot)
+
+
+
+
+# Test code ---------------------------------------------------------------
+
+#FACS plots
 #Fancy FACS plots - these don't work from the RDS files, only the GatingSets
 #for more see http://bioconductor.org/packages/release/bioc/vignettes/flowWorkspace/inst/doc/plotGate.html
 plotGate(gs_full, "aTreg cells (Fr. II)", xbin = 0, main = "Graph title")
